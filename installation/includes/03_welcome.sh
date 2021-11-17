@@ -2,17 +2,8 @@
 
 welcome() {
   clear 1>&3
-  echo "#########################################################
-#                                                       #
-#      ___  __ ______  _  __________ ____   __  _  _    #
-#     / _ \/ // / __ \/ |/ /  _/ __/(  _ \ /  \( \/ )   #
-#    / ___/ _  / /_/ /    // // _/   ) _ ((  O ))  (    #
-#   /_/  /_//_/\____/_/|_/___/____/ (____/ \__/(_/\_)   #
-#   future3                                             #
-#                                                       #
-#########################################################
-
-You are turning your Raspberry Pi into a Phoniebox.
+  splashscreen()
+  echo "You are turning your Raspberry Pi into a Phoniebox.
 Good choice!
 
 Depending on your hardware, this installation might last
