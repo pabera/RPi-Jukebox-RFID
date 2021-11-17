@@ -2,7 +2,7 @@
 
 welcome() {
   clear 1>&3
-  splashscreen()
+  splashscreen
   echo "You are turning your Raspberry Pi into a Phoniebox.
 Good choice!
 
