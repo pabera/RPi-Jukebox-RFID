@@ -12,16 +12,19 @@ fi
 
 arg="$1"
 
+# Explanation for sed command:
+# '/^xxx/{s/yyy//g;s/$/zzz/g;}'
+# Find lines starting with 'xxx'. In this line then replace existing string 'yyy' with '' then append 'zzz'
 if [ "$arg" = "enable" ]; then
     echo "Enabling Onboard Sound..."
     sudo sed -i "s/^\(dtparam=\([^,]*,\)*\)audio=\(off\|false\|no\|0\)\(.*\)/\1audio=on\4/g" "$boot_config_path"
-    sudo sed -i '/dtoverlay=vc4-fkms-v3d,audio=off/c\dtoverlay=vc4-fkms-v3d' "$boot_config_path"
-    sudo sed -i '/dtoverlay=vc4-kms-v3d,noaudio/c\dtoverlay=vc4-kms-v3d' "$boot_config_path"
+    sudo sed -i '/^dtoverlay=vc4-fkms-v3d/{s/,audio=off//g;}' "$boot_config_path"
+    sudo sed -i '/^dtoverlay=vc4-kms-v3d/{s/,noaudio//g;}' "$boot_config_path"
 elif [ "$arg" = "disable" ]; then
     echo "Disabling Onboard Sound..."
     sudo sed -i "s/^\(dtparam=\([^,]*,\)*\)audio=\(on\|true\|yes\|1\)\(.*\)/\1audio=off\4/g" "$boot_config_path"
-    sudo sed -i '/dtoverlay=vc4-fkms-v3d/c\dtoverlay=vc4-fkms-v3d,audio=off' "$boot_config_path"
-    sudo sed -i '/dtoverlay=vc4-kms-v3d/c\dtoverlay=vc4-kms-v3d,noaudio' "$boot_config_path"
+    sudo sed -i '/^dtoverlay=vc4-fkms-v3d/{s/,audio=off//g;s/$/,audio=off/g;}' "$boot_config_path"
+    sudo sed -i '/^dtoverlay=vc4-kms-v3d/{s/,noaudio//g;s/$/,noaudio/g;}' "$boot_config_path"
 fi
 
 # TODO Test
