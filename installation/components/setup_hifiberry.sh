@@ -3,9 +3,11 @@
 # This script follows the official HiFiBerry documentation
 # https://www.hifiberry.com/docs/software/configuring-linux-3-18-x/
 
-source ../includes/02_helpers.sh
 
 script_name=$(basename "$0")
+script_dir=$(dirname "$0")
+
+source "$script_dir"/../includes/02_helpers.sh
 boot_config_path=$(get_boot_config_path)
 
 declare -A hifiberry_map=(
@@ -31,13 +33,13 @@ example_usage() {
 enable_hifiberry() {
     echo "Enabling HiFiBerry board..."
     grep -qxF "^dtoverlay=$1" "$boot_config_path" || echo "dtoverlay=$1" | sudo tee -a "$boot_config_path" > /dev/null
-    ./../options/onboard_sound.sh disable
+    "$script_dir"/../options/onboard_sound.sh disable
 }
 
 disable_hifiberry() {
     echo "Removing existing HiFiBerry configuration..."
     sudo sed -i '/^dtoverlay=hifiberry-/d' "$boot_config_path"
-    ./../options/onboard_sound.sh enable
+    "$script_dir"/../options/onboard_sound.sh enable
 }
 
 check_existing_hifiberry() {

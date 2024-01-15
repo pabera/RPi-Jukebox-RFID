@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-source ../includes/02_helpers.sh
 script_name=$(basename "$0")
+script_dir=$(dirname "$0")
+
+source "$script_dir"/../includes/02_helpers.sh
 boot_config_path=$(get_boot_config_path)
 
 if [ -z "$1" ] || { [ "$1" != "enable" ] && [ "$1" != "disable" ]; }; then
