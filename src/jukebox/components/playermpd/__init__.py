@@ -150,6 +150,8 @@ class PlayerMPD:
         self.second_swipe_action = None
         self.decode_2nd_swipe_option()
 
+        self.music_player_status['player_status']['last_played_identifier'] = None
+        
         self.mpd_client = mpd.MPDClient()
         self.coverart_cache_manager = CoverartCacheManager()
 
@@ -464,6 +466,9 @@ class PlayerMPD:
     # ---------------
 
     def call_with_second_swipe(self, identifier: str, action: Callable, **kwargs):
+    
+        logger.debug(f"second_action='{identifier}'")
+        logger.debug(f"second_action='{action}'")
         logger.debug(f"last_played_identifier = {self.music_player_status['player_status']['last_played_identifier']}")
         with self.mpd_lock:
             is_second_swipe = self.music_player_status['player_status']['last_played_identifier'] == identifier
@@ -475,9 +480,13 @@ class PlayerMPD:
             self.second_swipe_action()
         else:
             logger.debug('Calling first swipe action')
-            if 'folder' in kwargs:  # TODO: Legacy code from previous implementation. should be adapted
-                play_card_callbacks.run_callbacks(kwargs.get('folder'), PlayCardState.firstSwipe)
-            action(**kwargs)
+            
+            if 'args' in kwargs:  # TODO: Legacy code from previous implementation. should be adapted
+                args=kwargs.get('args')
+                play_card_callbacks.run_callbacks(args, PlayCardState.firstSwipe)
+                
+            logger.debug(f"args='{args}'")
+            action(args)
             self.music_player_status['player_status']['last_played_identifier'] = identifier
 
     @plugs.tag
@@ -487,10 +496,29 @@ class PlayerMPD:
             'play_album': self.play_album,
             'play_folder': self.play_folder
         }
-
         action = actions.get(identifier)
         if action:
-            self.call_with_second_swipe(identifier, action, **kwargs)
+            logger.debug(f"last_played_identifier = {self.music_player_status['player_status']['last_played_identifier']}")
+            args=kwargs.get('args')
+            with self.mpd_lock:
+                sep = ' '
+                argstr=sep.join(args)
+                logger.debug(f"'{argstr}'")
+                is_second_swipe = self.music_player_status['player_status']['last_played_identifier'] == identifier.join(args)
+    
+            if self.second_swipe_action is not None and is_second_swipe:
+                logger.debug('Calling second swipe action')
+                
+                play_card_callbacks.run_callbacks(*args, PlayCardState.secondSwipe)
+                self.second_swipe_action()
+            else:
+                logger.debug('Calling first swipe action')
+                
+                args=kwargs.get('args')
+                play_card_callbacks.run_callbacks(*args, PlayCardState.firstSwipe)
+                    
+                action(*args)
+                self.music_player_status['player_status']['last_played_identifier'] = identifier.join(args)
         else:
             logger.error(f"Function '{identifier}' does not exist.")
 
@@ -510,6 +538,10 @@ class PlayerMPD:
 
     @plugs.tag
     def play_folder(self, folder: str, recursive: bool = False):
+    
+        logger.debug(f"Start playing Folder='{folder}'")
+        logger.debug(f"recursive='{recursive}'")
+    
         with self.mpd_lock:
             self.mpd_client.clear()
 
