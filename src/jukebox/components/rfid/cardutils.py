@@ -21,7 +21,17 @@ def decode_card_command(cfg_rpc_cmd: Mapping, logger: logging.Logger = log):
         action['ignore_same_id_delay'] = cfg_rpc_cmd['ignore_same_id_delay']
     if 'ignore_card_removal_action' in cfg_rpc_cmd:
         action['ignore_card_removal_action'] = cfg_rpc_cmd['ignore_card_removal_action']
-    return action
+    logger.debug(f"'action={action}'")
+    if action['package'] is "player" and action['plugin'] is "ctrl" and action['method'] in ["play_folder", "play_album", "play_song"]: 
+        newAction=action.copy()
+        newAction['method']="play_card"
+        newAction['args']="play_folder"
+        newAction['kwargs']={'args':action['args']}
+        logger.debug(f"'wrapped action={newAction}'")
+        return newAction
+    else:
+        return action
+    
 
 
 def card_command_to_str(cfg_rpc_cmd: Mapping, long=False) -> List[str]:
