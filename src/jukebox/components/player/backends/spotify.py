@@ -12,12 +12,17 @@ from ..spotify import SpotifyCatalog, SpotifyError, _first_image
 
 logger = logging.getLogger('jb.player.spotify')
 TRANSFER_RETRY_DELAY = 0.5
+# Without playback, slow the status poll down and then stop it: an always-on
+# poller exhausts the Spotify Web API rate limit within a night.
+IDLE_AFTER_SECONDS = 120
+IDLE_POLL_INTERVAL_SECONDS = 60
+SLEEP_AFTER_SECONDS = 600
 
 
 class SpotifyPlayer:
     """Control a configured librespot Spotify Connect device."""
 
-    def __init__(self, service, poll_interval=1.0):
+    def __init__(self, service, poll_interval=1.0, clock=time.monotonic):
         self.service = service
         self.api = service.api
         self.catalog = service.catalog
@@ -26,10 +31,14 @@ class SpotifyPlayer:
         self._device_id = None
         self._status = self._empty_status()
         self._lock = threading.RLock()
+        self._clock = clock
+        self._last_activity = clock()
+        self._last_poll = None
+        self._sleeping = False
         self._status_timer = multitimer.GenericEndlessTimerClass(
             'spotify.timer_status',
             poll_interval,
-            self._poll_status,
+            self._poll_status_tick,
         )
         self._status_timer.start()
 
@@ -267,10 +276,37 @@ class SpotifyPlayer:
     def _device_params(self):
         return {'device_id': self._device_id} if self._device_id else None
 
+    def _poll_status_tick(self):
+        """Timer callback: poll on every tick while playing, then back off and sleep."""
+        with self._lock:
+            now = self._clock()
+            idle_for = now - self._last_activity
+            if idle_for >= SLEEP_AFTER_SECONDS:
+                if not self._sleeping:
+                    self._sleeping = True
+                    if self._active:
+                        logger.info(
+                            'Spotify idle for %d s; status polling paused until the next command',
+                            int(idle_for),
+                        )
+                return
+            if (idle_for >= IDLE_AFTER_SECONDS and self._last_poll is not None
+                    and now - self._last_poll < IDLE_POLL_INTERVAL_SECONDS):
+                return
+        self._refresh_status()
+
     def _poll_status(self):
+        """Refresh status after a command; commands count as activity and wake the poller."""
+        with self._lock:
+            self._last_activity = self._clock()
+            self._sleeping = False
+        self._refresh_status()
+
+    def _refresh_status(self):
         with self._lock:
             if not self._active or not self.service.oauth.connected:
                 return
+            self._last_poll = self._clock()
         try:
             playback = self.api.get('/me/player')
             device = (playback or {}).get('device') or {}
@@ -279,6 +315,9 @@ class SpotifyPlayer:
                 self._status = self._normalize_status(playback)
             else:
                 self._status = self._empty_status()
+            if self._status.get('state') == 'play':
+                with self._lock:
+                    self._last_activity = self._clock()
             self._publish_status()
         except SpotifyError as error:
             logger.warning('Could not update Spotify playback status: %s', error)

@@ -316,14 +316,55 @@ class SpotifyOAuth:
 class SpotifyWebApiClient:
     """Small authenticated client for the Spotify Web API."""
 
-    def __init__(self, oauth, *, session=None, api_url=SPOTIFY_API_URL):
+    CALL_REPORT_INTERVAL_SECONDS = 3600
+
+    def __init__(self, oauth, *, session=None, api_url=SPOTIFY_API_URL, clock=time.monotonic):
         self.oauth = oauth
         self.session = session or requests.Session()
         self.api_url = api_url.rstrip('/')
+        self._rate_limited_until = 0.0
+        self._clock = clock
+        self._call_lock = threading.Lock()
+        self._calls_in_window = 0
+        self._window_started = clock()
+
+    def _count_call(self):
+        with self._call_lock:
+            now = self._clock()
+            elapsed = now - self._window_started
+            if elapsed >= self.CALL_REPORT_INTERVAL_SECONDS:
+                logger.info(
+                    'Spotify API: %d requests in the last %d min',
+                    self._calls_in_window,
+                    int(elapsed // 60),
+                )
+                self._calls_in_window = 0
+                self._window_started = now
+            self._calls_in_window += 1
+
+    def _check_rate_limit(self):
+        # Requests sent during a 429 cooldown extend Spotify's ban, so fail locally instead.
+        remaining = self._rate_limited_until - self._clock()
+        if remaining > 0:
+            raise SpotifyError(
+                f'Spotify rate limit active; retry in {int(remaining) + 1} s',
+                status=429,
+                code='spotify_rate_limited',
+            )
+
+    def _start_rate_limit_cooldown(self, response):
+        try:
+            retry_after = max(1, int(response.headers.get('Retry-After', 30)))
+        except ValueError:
+            retry_after = 30
+        self._rate_limited_until = self._clock() + retry_after
+        logger.warning('Spotify rate limit hit; pausing API requests for %s s', retry_after)
 
     def request(self, method, path, *, params=None, json_body=None, retry=True):
+        self._check_rate_limit()
         url = path if path.startswith('http') else f'{self.api_url}/{path.lstrip("/")}'
         headers = {'Authorization': f'Bearer {self.oauth.access_token()}'}
+        self._count_call()
         try:
             response = self.session.request(
                 method,
@@ -345,6 +386,8 @@ class SpotifyWebApiClient:
                 json_body=json_body,
                 retry=False,
             )
+        if response.status_code == 429:
+            self._start_rate_limit_cooldown(response)
         if not response.ok:
             raise SpotifyError(
                 _spotify_error_message(response),

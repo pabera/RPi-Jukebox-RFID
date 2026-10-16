@@ -48,7 +48,7 @@ def configure_spotify(player_ctrl):
     _spotify_service.enabled = bool(enabled)
 
     if enabled:
-        player_ctrl.register_backend('spotify', SpotifyPlayer(_spotify_service))
+        player_ctrl.register_backend('spotify', SpotifyPlayer(_spotify_service, poll_interval=5.0))
         logger.info("Enabled Spotify player backend for device '%s'", device_name)
     return _spotify_service
 

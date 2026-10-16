@@ -561,3 +561,106 @@ def test_player_status_matches_existing_mpd_webapp_contract():
     assert status['repeat'] == '0'
     assert status['single'] == '1'
     assert status['provider'] == 'spotify'
+
+
+class PlayingPlaybackApi(FakePlaybackApi):
+    def get(self, path, params=None):
+        if path == '/me/player':
+            self.calls.append(('GET', path, params, None))
+            return {
+                'is_playing': True,
+                'device': {'id': 'device-id', 'name': 'Phoniebox'},
+                'item': {'uri': 'spotify:track:track-id', 'name': 'Song'},
+            }
+        return super().get(path, params)
+
+
+def _idle_test_player(monkeypatch, api, now):
+    monkeypatch.setattr(spotify_backend.multitimer, 'GenericEndlessTimerClass', FakeTimer)
+    service = SimpleNamespace(
+        api=api,
+        catalog=SimpleNamespace(),
+        device_name='Phoniebox',
+        oauth=SimpleNamespace(connected=True),
+    )
+    player = SpotifyPlayer(service, poll_interval=5.0, clock=lambda: now[0])
+    player._active = True
+    return player
+
+
+def _status_polls(api):
+    return sum(1 for call in api.calls if call[:2] == ('GET', '/me/player'))
+
+
+def test_status_polling_backs_off_and_sleeps_when_idle(monkeypatch):
+    now = [0]
+    api = FakePlaybackApi()
+    player = _idle_test_player(monkeypatch, api, now)
+
+    def tick_at(seconds):
+        now[0] = seconds
+        player._poll_status_tick()
+        return _status_polls(api)
+
+    assert tick_at(0) == 1
+    assert tick_at(5) == 2
+    assert tick_at(130) == 3
+    assert tick_at(150) == 3
+    assert tick_at(190) == 4
+    assert tick_at(600) == 4
+    assert tick_at(900) == 4
+
+    player.pause(1)
+    assert _status_polls(api) == 5
+    assert tick_at(905) == 6
+
+
+def test_status_polling_continues_while_playing(monkeypatch):
+    now = [0]
+    api = PlayingPlaybackApi()
+    player = _idle_test_player(monkeypatch, api, now)
+
+    for seconds in range(0, 1205, 5):
+        now[0] = seconds
+        player._poll_status_tick()
+
+    assert _status_polls(api) == len(range(0, 1205, 5))
+    assert player.playerstatus()['state'] == 'play'
+
+
+def test_web_api_pauses_requests_until_retry_after_expires():
+    now = [0]
+    oauth = SimpleNamespace(access_token=lambda **kwargs: 'token')
+    limited = FakeResponse({'error': {'message': 'Too many requests'}}, status=429)
+    limited.headers = {'Retry-After': '120'}
+    session = FakeSession([limited, FakeResponse({'devices': []})])
+    api = SpotifyWebApiClient(oauth, session=session, clock=lambda: now[0])
+
+    with pytest.raises(SpotifyError) as first:
+        api.get('/me/player/devices')
+    assert first.value.status == 429
+
+    now[0] = 119
+    with pytest.raises(SpotifyError) as blocked:
+        api.get('/me/player/devices')
+    assert blocked.value.code == 'spotify_rate_limited'
+    assert len(session.calls) == 1
+
+    now[0] = 121
+    assert api.get('/me/player/devices') == {'devices': []}
+    assert len(session.calls) == 2
+
+
+def test_web_api_logs_hourly_request_count(caplog):
+    now = [0]
+    oauth = SimpleNamespace(access_token=lambda **kwargs: 'token')
+    session = FakeSession([FakeResponse({}) for _ in range(4)])
+    api = SpotifyWebApiClient(oauth, session=session, clock=lambda: now[0])
+
+    for _ in range(3):
+        api.get('/me/player')
+    now[0] = 3600
+    with caplog.at_level('INFO', logger='jb.player.spotify'):
+        api.get('/me/player')
+
+    assert 'Spotify API: 3 requests in the last 60 min' in caplog.text
